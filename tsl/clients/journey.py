@@ -365,9 +365,3 @@ class JourneyPlannerClient(AsyncClient):
 
         args = UrlParams(f"{self.BASE_URL}/line-list", params)
         return await self._request_json(args)
-
-        if merge_directions is not None:
-            params.append(("merge_dir", _str_bool(merge_directions)))
-
-        args = UrlParams(f"{self.BASE_URL}/line-list", params)
-        return await self._request_json(args)
