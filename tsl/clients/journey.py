@@ -92,8 +92,9 @@ class JourneyPlannerClient(AsyncClient):
         locations = cast(List[StopFinderType], locations)
         return sorted(locations, key=lambda x: x["matchQuality"], reverse=True)
 
-    @staticmethod
+    @classmethod
     def build_request_params(
+        cls,
         origin: SearchLeg,
         destination: SearchLeg,
         calc_number_of_trips: int = 1,
@@ -300,10 +301,7 @@ class JourneyPlannerClient(AsyncClient):
                 ("compute_monomodal_trip_pedestrian", _str_bool(compute_walk_trip))
             )
 
-        return UrlParams(
-            "https://journeyplanner.integration.sl.se/v2/trips",
-            params,
-        )
+        return UrlParams(f"{cls.BASE_URL}/trips", params)
 
     async def search_trip(self, params: UrlParams) -> List[Journey]:
         """
