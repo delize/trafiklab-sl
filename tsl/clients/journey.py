@@ -1,7 +1,16 @@
 from datetime import date, time
-from typing import Any, Dict, List, TypedDict
+from typing import Any, Dict, List, TypedDict, cast
 
-from tsl.models.journey import DwellTime, Journey, Language, RouteType, SearchLeg
+from tsl.models.journey import (
+    DwellTime,
+    Journey,
+    Language,
+    RouteType,
+    SearchLeg,
+    SearchType,
+    StopFilter,
+)
+from tsl.models.stops import StopFinderType
 
 from .common import AsyncClient, OperationFailed, ResponseFormatChanged, UrlParams
 
@@ -16,37 +25,6 @@ class SystemValidity(TypedDict):
 
     from_date: str  # renamed from 'from' which is a Python keyword
     to_date: str  # renamed from 'to'
-
-
-class StopParent(TypedDict, total=False):
-    """Parent location information for a stop."""
-
-    id: str
-    name: str
-    type: str
-
-
-class StopProperties(TypedDict, total=False):
-    """Additional properties for a stop."""
-
-    mainLocality: str
-    stopId: str
-
-
-class StopLocation(TypedDict, total=False):
-    """Stop location from stop-finder endpoint."""
-
-    id: str  # Global ID (e.g., "9091001000009117")
-    name: str  # Full name (e.g., "Stockholm, Odenplan")
-    disassembledName: str  # Short name (e.g., "Odenplan")
-    coord: List[float]  # [lat, lon]
-    type: str  # "stop", "poi", "address", etc.
-    matchQuality: int  # 0-1000, higher is better
-    isBest: bool  # True if this is the best match
-    isGlobalId: bool
-    parent: StopParent
-    productClasses: List[int]  # Transport mode classes
-    properties: StopProperties
 
 
 class JourneyPlannerClient(AsyncClient):
@@ -74,10 +52,8 @@ class JourneyPlannerClient(AsyncClient):
         )
 
     async def find_stops(
-        self,
-        query: str,
-        stops_only: bool = True,
-    ) -> List[StopLocation]:
+        self, query: SearchLeg, filter: StopFilter = StopFilter.STOPS
+    ) -> List[StopFinderType]:
         """
         Search for stops, addresses, or points of interest by name.
 
@@ -86,32 +62,35 @@ class JourneyPlannerClient(AsyncClient):
 
         Args:
             query: Search query (e.g., "odenplan", "t-centralen")
-            stops_only: If True, only return stops (not addresses/POIs)
+            filter: allows limiting results to specific types (default: stops only)
 
         Returns:
             List of StopLocation objects sorted by match quality
 
         Example:
-            stops = await client.find_stops("odenplan")
-            # Use stops[0]["id"] with SearchLeg for journey planning
+            stops = await client.find_stops(SearchLeg.from_any("odenplan"))
+            # Use SearchLeg.from_stop_finder(stops[0]) for journey planning
         """
+
         params: List[tuple[str, Any]] = [
-            ("name_sf", query),
-            ("type_sf", "any"),
+            ("any_obj_filter_sf", str(filter.value)),
         ]
 
-        if stops_only:
-            params.append(("any_obj_filter_sf", 2))
+        if query.type == SearchType.COORD:
+            params.append(("name_sf", query.value))
+            params.append(("type_sf", "coord"))
+        else:
+            params.append(("name_sf", query.value))
+            params.append(("type_sf", "any"))
 
         args = UrlParams(f"{self.BASE_URL}/stop-finder", params)
         response = await self._request_json(args)
 
-        locations = response.get("locations", [])
-        return (
-            [loc for loc in locations if loc.get("type") == "stop"]
-            if stops_only
-            else locations
-        )
+        if (locations := response.get("locations")) is None:
+            raise ResponseFormatChanged("'ResponseData' not found in response")
+
+        locations = cast(List[StopFinderType], locations)
+        return sorted(locations, key=lambda x: x["matchQuality"], reverse=True)
 
     @staticmethod
     def build_request_params(
@@ -380,6 +359,12 @@ class JourneyPlannerClient(AsyncClient):
 
         if branch_code is not None:
             params.append(("line_list_branch_code", branch_code))
+
+        if merge_directions is not None:
+            params.append(("merge_dir", _str_bool(merge_directions)))
+
+        args = UrlParams(f"{self.BASE_URL}/line-list", params)
+        return await self._request_json(args)
 
         if merge_directions is not None:
             params.append(("merge_dir", _str_bool(merge_directions)))
